@@ -5,6 +5,11 @@ Supports multiple AI backends: Groq (free), HuggingFace (free), Claude (paid), O
 Now includes CIM Mapping Tool for field-to-CIM data model mapping.
 """
 
+# === DIAGNOSTIC: Will appear in Streamlit Cloud logs ===
+print("[DIAG] ===== app.py loading =====", flush=True)
+
+import sys
+import traceback
 import streamlit as st
 from utils.kb_loader import KBLoader
 from utils.ai_client import AIClientFactory, BaseAIClient
@@ -15,9 +20,12 @@ try:
     from utils.detection_engine import DetectionEngine
     DETECTION_AVAILABLE = True
     detection_import_error = ""
+    print(f"[DIAG] DetectionEngine imported successfully. DETECTION_AVAILABLE={DETECTION_AVAILABLE}", flush=True)
 except Exception as e:
     DETECTION_AVAILABLE = False
-    detection_import_error = str(e)
+    detection_import_error = f"{type(e).__name__}: {e}"
+    print(f"[DIAG] DetectionEngine import FAILED: {detection_import_error}", flush=True)
+    traceback.print_exc()
 
 # Page configuration
 st.set_page_config(
@@ -150,6 +158,7 @@ st.markdown('<p class="main-header">🛡️ SIEM Log Source Onboarding Assistant
 st.markdown(f'<p class="sub-header">Currently viewing: <strong>{log_sources[selected_source]["display_name"]}</strong></p>', unsafe_allow_html=True)
 
 # Create tabs
+print(f"[DIAG] Creating 7 tabs. DETECTION_AVAILABLE={DETECTION_AVAILABLE}", flush=True)
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📘 Integration Guide", "🔗 References", "🎯 Use Cases", 
     "🔧 CIM Mapper", "💬 AI Chat", "⚙️ AI Setup", "🛡️ Detection Engineering"
@@ -579,17 +588,22 @@ with tab6:
 
 # Tab 7: Detection Engineering — with full error handling
 with tab7:
+    print(f"[DIAG] Entering tab7. DETECTION_AVAILABLE={DETECTION_AVAILABLE}", flush=True)
     try:
         if not DETECTION_AVAILABLE:
             st.error("🛡️ Detection Engineering Unavailable")
-            st.warning(f"**Missing dependency:** `{detection_import_error}`")
+            st.warning(f"**Import error:** `{detection_import_error}`")
             st.markdown("""
             ### How to Fix
             
-            Install the required packages:
+            Install the required packages in your `requirements.txt`:
             
-            ```bash
-            pip install pysigma pysigma-backend-splunk pandas pyyaml requests
+            ```
+            pysigma
+            pysigma-backend-splunk
+            pandas
+            pyyaml
+            requests
             ```
             
             Then restart the application.
@@ -600,7 +614,9 @@ with tab7:
             - Test rules against synthetic log data
             - MITRE ATT&CK mapping and metadata
             """)
+            print(f"[DIAG] tab7: showed 'Unavailable' message", flush=True)
         else:
+            print(f"[DIAG] tab7: DETECTION_AVAILABLE=True, rendering Detection Engineering UI", flush=True)
             st.markdown("### 🛡️ Detection Engineering & Rule Standardization")
             st.info(f"📍 Detection rules for **{log_sources[selected_source]['display_name']}**")
             
@@ -799,7 +815,11 @@ with tab7:
                 **Available for:** Windows, Linux, Azure AD, Office 365, CrowdStrike, Palo Alto, Zscaler, and more!
                 """)
     except Exception as e:
-        st.error(f"🛡️ Detection Engineering tab encountered an error: {type(e).__name__}: {e}")
+        error_detail = f"{type(e).__name__}: {e}"
+        print(f"[DIAG] tab7 EXCEPTION: {error_detail}", flush=True)
+        traceback.print_exc()
+        st.error(f"🛡️ Detection Engineering tab encountered an error: {error_detail}")
+        st.code(traceback.format_exc(), language="python")
         st.markdown("""
         **Troubleshooting Steps:**
         1. Restart Streamlit: `streamlit run app.py`
