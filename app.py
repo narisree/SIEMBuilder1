@@ -9,7 +9,15 @@ import streamlit as st
 from utils.kb_loader import KBLoader
 from utils.ai_client import AIClientFactory, BaseAIClient
 from utils.usecase_loader import UseCaseLoader
-from utils.detection_engine import DetectionEngine
+
+# --- Guarded import for Detection Engine ---
+try:
+    from utils.detection_engine import DetectionEngine
+    DETECTION_AVAILABLE = True
+    detection_import_error = ""
+except ImportError as e:
+    DETECTION_AVAILABLE = False
+    detection_import_error = str(e)
 
 # Page configuration
 st.set_page_config(
@@ -27,9 +35,6 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 24px; }
     .stTabs [data-baseweb="tab"] { height: 50px; padding-left: 20px; padding-right: 20px; }
     .reference-card { background-color: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; border-left: 4px solid #1E3A5F; }
-    .chat-message { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
-    .user-message { background-color: #e3f2fd; border-left: 4px solid #1976d2; }
-    .assistant-message { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
     .warning-box { background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
     .success-box { background-color: #d4edda; border: 1px solid #28a745; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
     .info-box { background-color: #e7f3ff; border: 1px solid #0066cc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
@@ -40,8 +45,6 @@ st.markdown("""
     .usecase-title { font-size: 1.2rem; font-weight: bold; color: #1E3A5F; margin-bottom: 0.5rem; }
     .mitre-badge { background-color: #dc3545; color: white; padding: 3px 10px; border-radius: 4px; font-size: 0.8rem; margin-right: 8px; display: inline-block; margin-bottom: 5px; }
     .technique-badge { background-color: #6f42c1; color: white; padding: 3px 10px; border-radius: 4px; font-size: 0.8rem; display: inline-block; margin-bottom: 5px; }
-    .l1-guidance-box { background-color: #e8f4f8; border: 1px solid #17a2b8; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
-    .l1-validation-box { background-color: #fff8e6; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
     .cim-card { background-color: #f0f7ff; border: 1px solid #0066cc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
 </style>
 """, unsafe_allow_html=True)
@@ -287,7 +290,6 @@ with tab4:
                     if vendor_doc_result.success:
                         st.success(f"Loaded vendor documentation ({vendor_doc_result.doc_type})")
 
-                        # Show extracted info
                         col_v1, col_v2 = st.columns(2)
                         with col_v1:
                             if vendor_doc_result.extracted_vendor:
@@ -327,7 +329,6 @@ with tab4:
                 with st.spinner("Performing AI semantic field analysis..."):
                     ai_parser = create_ai_field_parser(st.session_state.ai_client)
 
-                    # Get vendor context if available
                     vendor_context = None
                     if vendor_doc_result and vendor_doc_result.success:
                         vendor_loader = create_vendor_doc_loader()
@@ -338,7 +339,6 @@ with tab4:
                     if ai_field_result.success:
                         st.success("AI field analysis complete")
 
-                        # Show AI-detected info
                         col_ai1, col_ai2, col_ai3 = st.columns(3)
                         with col_ai1:
                             if ai_field_result.log_category:
@@ -351,10 +351,8 @@ with tab4:
                             if review_count > 0:
                                 st.warning(f"Fields need review: {review_count}")
 
-            # Display detected fields with AI enrichment
             with st.expander("📋 Detected Fields" + (" (AI-Enhanced)" if ai_field_result else "")):
                 if ai_field_result and ai_field_result.success:
-                    # Show enhanced field table
                     st.markdown("| Field | Category | Suggested CIM | Type |")
                     st.markdown("|-------|----------|---------------|------|")
                     for name, values in list(parsed_log.fields.items())[:20]:
@@ -366,7 +364,6 @@ with tab4:
                             flag = " (!)" if enriched.needs_review else ""
                             st.markdown(f"| `{name}`{flag} | {category} | {cim_field} | {map_type} |")
                         else:
-                            sample = ', '.join(str(v) for v in list(set(values))[:2])
                             st.markdown(f"| `{name}` | - | - | - |")
                 else:
                     for name, values in list(parsed_log.fields.items())[:15]:
@@ -402,13 +399,11 @@ with tab4:
                             try:
                                 mapping_chain = create_mapping_chain(vector_store, st.session_state.ai_client)
 
-                                # Get vendor context for mapping
                                 vendor_context_for_mapping = None
                                 if vendor_doc_result and vendor_doc_result.success:
                                     vendor_loader = create_vendor_doc_loader()
                                     vendor_context_for_mapping = vendor_loader.get_context_for_ai(vendor_doc_result)
 
-                                # Call analyze with enhanced parameters
                                 result = mapping_chain.analyze(
                                     parsed_log,
                                     ai_field_result=ai_field_result if use_ai_field_parsing else None,
@@ -418,7 +413,6 @@ with tab4:
                                 if result['success']:
                                     st.success("CIM Mapping Generated!")
 
-                                    # Show enhancement badges
                                     if result.get('ai_field_analysis_used') or result.get('vendor_docs_used'):
                                         badges = []
                                         if result.get('ai_field_analysis_used'):
@@ -435,7 +429,6 @@ with tab4:
                                     with col3:
                                         st.metric("Confidence", f"{result.get('confidence', 0):.0%}")
 
-                                    # Generate outputs
                                     output_gen = OutputGenerator(selected_mode)
                                     outputs = output_gen.generate_output(result, sourcetype_name)
 
@@ -479,18 +472,18 @@ with tab4:
             Malware, Email, Intrusion_Detection, Network_Resolution, Alerts, Databases
             """)
 
-# Tab 5: AI Chat
+# Tab 5: AI Chat — Uses st.chat_message() for safe rendering
 with tab5:
     st.markdown("### 💬 Ask Questions About This Integration")
     
     if st.session_state.ai_client:
         st.markdown(f"*Using **{st.session_state.ai_client.get_provider_name()}** for {log_sources[selected_source]['display_name']}*")
         
+        # --- FIXED: Use st.chat_message() instead of unsafe HTML injection ---
         for message in st.session_state.chat_history:
-            role_icon = "🧑" if message["role"] == "user" else "🤖"
-            css_class = "user-message" if message["role"] == "user" else "assistant-message"
-            st.markdown(f'<div class="chat-message {css_class}"><strong>{role_icon}</strong>: {message["content"]}</div>', 
-                       unsafe_allow_html=True)
+            role = message["role"]
+            with st.chat_message("user" if role == "user" else "assistant"):
+                st.markdown(message["content"])
         
         with st.form(key="chat_form", clear_on_submit=True):
             user_question = st.text_area("Your question:", placeholder="What ports need to be open?", height=100)
@@ -584,197 +577,231 @@ with tab6:
     **Local:** Create `.streamlit/secrets.toml`
     """)
 
-# Tab 7: Detection Engineering
+# Tab 7: Detection Engineering — with availability guard
 with tab7:
-    st.markdown("### 🛡️ Detection Engineering & Rule Standardization")
-    st.info(f"📍 Detection rules for **{log_sources[selected_source]['display_name']}**")
-    
-    # Initialize Detection Engine
-    detection_engine = DetectionEngine()
-    
-    # Get available rules for selected source
-    available_rules = detection_engine.get_rules_for_source(selected_source)
-    
-    # Rule management row
-    col_download, col_selector = st.columns([1, 2])
-    
-    with col_download:
-        if st.button("⬇️ Download Latest Rules", type="secondary", use_container_width=True):
-            with st.spinner("Downloading rules from SigmaHQ GitHub..."):
-                result = detection_engine.download_rules_from_github(selected_source)
-                
-                if result["success"]:
-                    new = result["downloaded_count"]
-                    skipped = result["skipped_count"]
-                    updated = result["updated_count"]
-                    
-                    if new > 0:
-                        st.success(f"✅ Downloaded {new} new rule(s)!")
-                    if skipped > 0:
-                        st.info(f"ℹ️ Skipped {skipped} duplicate(s)")
-                    if updated > 0:
-                        st.info(f"✅ Updated {updated} existing rule(s)")
-                    if new == 0 and updated == 0:
-                        st.info("All rules are up to date!")
-                    
-                    # Refresh available rules
-                    available_rules = detection_engine.get_rules_for_source(selected_source)
-                    st.rerun()
-                else:
-                    st.error(f"Download failed: {result.get('error', 'Unknown error')}")
-    
-    with col_selector:
-        if available_rules:
-            rule_options = {rule["title"]: rule for rule in available_rules}
-            selected_rule_title = st.selectbox(
-                "Select Sigma Rule:",
-                options=list(rule_options.keys()),
-                help="Choose a detection rule to analyze"
-            )
-            selected_rule = rule_options[selected_rule_title]
-        else:
-            st.warning("No rules available. Click 'Download Latest Rules' to fetch from SigmaHQ.")
-            selected_rule = None
-    
-    # Display rule metadata
-    if selected_rule:
-        col_meta1, col_meta2, col_meta3 = st.columns(3)
-        with col_meta1:
-            st.metric("Status", selected_rule["status"].upper())
-        with col_meta2:
-            st.metric("Severity", selected_rule["level"].upper())
-        with col_meta3:
-            mitre_count = len(selected_rule["mitre_tags"])
-            st.metric("MITRE Techniques", mitre_count)
+    if not DETECTION_AVAILABLE:
+        st.error("🛡️ Detection Engineering Unavailable")
+        st.warning(f"**Missing dependency:** `{detection_import_error}`")
+        st.markdown("""
+        ### How to Fix
         
-        if selected_rule["mitre_tags"]:
-            st.caption(f"🎯 **MITRE ATT&CK:** {', '.join(selected_rule['mitre_tags'])}")
+        Install the required packages:
         
-        with st.expander("📖 Rule Description"):
-            st.markdown(selected_rule["description"])
-    
-    st.markdown("---")
-    
-    # Two-column layout for rule and test logs
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        st.markdown("#### 📜 Sigma Rule (YAML)")
-        if selected_rule:
-            sigma_rule_text = st.text_area(
-                "Edit Sigma Rule:",
-                value=selected_rule["rule_yaml"],
-                height=300,
-                key="sigma_rule_input",
-                label_visibility="collapsed"
-            )
-        else:
-            sigma_rule_text = st.text_area(
-                "Paste Sigma Rule YAML:",
-                placeholder="Paste your Sigma rule in YAML format...",
-                height=300,
-                key="sigma_rule_input_empty",
-                label_visibility="collapsed"
-            )
-    
-    with col_right:
-        st.markdown("#### 🔍 Test Logs (JSON)")
-        if selected_rule:
-            test_logs_default = detection_engine.get_test_logs_for_rule(
-                selected_source, 
-                selected_rule["filename"]
-            )
-            test_logs_text = st.text_area(
-                "Edit Test Logs:",
-                value=test_logs_default if test_logs_default != "[]" else "[]",
-                height=300,
-                key="test_logs_input",
-                label_visibility="collapsed"
-            )
-        else:
-            test_logs_text = st.text_area(
-                "Paste Test Logs (JSON Array):",
-                placeholder='[{"EventID": 4688, "Image": "C:\\\\Windows\\\\System32\\\\cmd.exe", ...}]',
-                height=300,
-                key="test_logs_input_empty",
-                label_visibility="collapsed"
-            )
-    
-    st.markdown("---")
-    
-    # Action buttons
-    col_btn1, col_btn2 = st.columns(2)
-    
-    with col_btn1:
-        if st.button("🔄 Convert to SPL", type="primary", use_container_width=True):
-            if sigma_rule_text.strip():
-                with st.spinner("Converting Sigma rule to Splunk SPL..."):
-                    result = detection_engine.convert_sigma_to_spl(sigma_rule_text)
+        ```bash
+        pip install pysigma pysigma-backend-splunk pandas pyyaml requests
+        ```
+        
+        Then restart the application.
+        
+        **What this tab provides:**
+        - Download curated Sigma rules from SigmaHQ
+        - Convert Sigma YAML rules to Splunk SPL queries
+        - Test rules against synthetic log data
+        - MITRE ATT&CK mapping and metadata
+        """)
+    else:
+        st.markdown("### 🛡️ Detection Engineering & Rule Standardization")
+        st.info(f"📍 Detection rules for **{log_sources[selected_source]['display_name']}**")
+        
+        # Initialize Detection Engine
+        detection_engine = DetectionEngine()
+        
+        # Get available rules for selected source
+        available_rules = detection_engine.get_rules_for_source(selected_source)
+        
+        # Rule management row
+        col_download, col_selector = st.columns([1, 2])
+        
+        with col_download:
+            if st.button("⬇️ Download Latest Rules", type="secondary", use_container_width=True):
+                with st.spinner("Downloading rules from SigmaHQ GitHub..."):
+                    result = detection_engine.download_rules_from_github(selected_source)
                     
                     if result["success"]:
-                        st.success("✅ Conversion Successful!")
-                        with st.expander("📊 Splunk SPL Query", expanded=True):
-                            st.code(result["spl_query"], language="sql")
-                            st.download_button(
-                                "Download SPL",
-                                result["spl_query"],
-                                file_name=f"{selected_rule['title'] if selected_rule else 'sigma_rule'}.spl",
-                                mime="text/plain"
-                            )
+                        new = result["downloaded_count"]
+                        skipped = result["skipped_count"]
+                        updated = result["updated_count"]
+                        
+                        # Show rate limit info if available
+                        if result.get("rate_limit_remaining") is not None:
+                            remaining = result["rate_limit_remaining"]
+                            if remaining < 10:
+                                st.warning(f"⚠️ GitHub API rate limit low: {remaining} requests remaining. Resets at {result.get('rate_limit_reset', 'unknown')}.")
+                            else:
+                                st.caption(f"GitHub API: {remaining} requests remaining")
+                        
+                        if new > 0:
+                            st.success(f"✅ Downloaded {new} new rule(s)!")
+                        if skipped > 0:
+                            st.info(f"ℹ️ Skipped {skipped} duplicate(s)")
+                        if updated > 0:
+                            st.info(f"✅ Updated {updated} existing rule(s)")
+                        if new == 0 and updated == 0:
+                            st.info("All rules are up to date!")
+                        
+                        # Refresh available rules
+                        available_rules = detection_engine.get_rules_for_source(selected_source)
+                        st.rerun()
                     else:
-                        st.error(f"❌ Conversion Failed: {result['error']}")
+                        error_msg = result.get('error', 'Unknown error')
+                        if "rate limit" in error_msg.lower() or result.get("rate_limited"):
+                            reset_time = result.get("rate_limit_reset", "~1 hour")
+                            st.error(f"🚫 GitHub API rate limit exceeded. Resets at {reset_time}.")
+                            st.info("**Tip:** Unauthenticated requests are limited to 60/hour. Wait and retry, or add a GitHub token.")
+                        else:
+                            st.error(f"Download failed: {error_msg}")
+        
+        with col_selector:
+            if available_rules:
+                rule_options = {rule["title"]: rule for rule in available_rules}
+                selected_rule_title = st.selectbox(
+                    "Select Sigma Rule:",
+                    options=list(rule_options.keys()),
+                    help="Choose a detection rule to analyze"
+                )
+                selected_rule = rule_options[selected_rule_title]
             else:
-                st.warning("Please provide a Sigma rule first.")
-    
-    with col_btn2:
-        if st.button("🧪 Test Rule", type="primary", use_container_width=True):
-            if sigma_rule_text.strip() and test_logs_text.strip():
-                with st.spinner("Testing rule against logs..."):
-                    result = detection_engine.test_sigma_rule(sigma_rule_text, test_logs_text)
-                    
-                    if result["success"]:
-                        if result["count"] > 0:
-                            st.success(f"✅ Rule matched {result['count']} event(s)!")
-                            with st.expander("🎯 Matching Events", expanded=True):
-                                st.dataframe(result["matches"], use_container_width=True)
-                                
-                                # Download as CSV
-                                csv = result["matches"].to_csv(index=False)
+                st.warning("No rules available. Click 'Download Latest Rules' to fetch from SigmaHQ.")
+                selected_rule = None
+        
+        # Display rule metadata
+        if selected_rule:
+            col_meta1, col_meta2, col_meta3 = st.columns(3)
+            with col_meta1:
+                st.metric("Status", selected_rule["status"].upper())
+            with col_meta2:
+                st.metric("Severity", selected_rule["level"].upper())
+            with col_meta3:
+                mitre_count = len(selected_rule["mitre_tags"])
+                st.metric("MITRE Techniques", mitre_count)
+            
+            if selected_rule["mitre_tags"]:
+                st.caption(f"🎯 **MITRE ATT&CK:** {', '.join(selected_rule['mitre_tags'])}")
+            
+            with st.expander("📖 Rule Description"):
+                st.markdown(selected_rule["description"])
+        
+        st.markdown("---")
+        
+        # Two-column layout for rule and test logs
+        col_left, col_right = st.columns(2)
+        
+        with col_left:
+            st.markdown("#### 📜 Sigma Rule (YAML)")
+            if selected_rule:
+                sigma_rule_text = st.text_area(
+                    "Edit Sigma Rule:",
+                    value=selected_rule["rule_yaml"],
+                    height=300,
+                    key="sigma_rule_input",
+                    label_visibility="collapsed"
+                )
+            else:
+                sigma_rule_text = st.text_area(
+                    "Paste Sigma Rule YAML:",
+                    placeholder="Paste your Sigma rule in YAML format...",
+                    height=300,
+                    key="sigma_rule_input_empty",
+                    label_visibility="collapsed"
+                )
+        
+        with col_right:
+            st.markdown("#### 🔍 Test Logs (JSON)")
+            if selected_rule:
+                test_logs_default = detection_engine.get_test_logs_for_rule(
+                    selected_source, 
+                    selected_rule["filename"]
+                )
+                test_logs_text = st.text_area(
+                    "Edit Test Logs:",
+                    value=test_logs_default if test_logs_default != "[]" else "[]",
+                    height=300,
+                    key="test_logs_input",
+                    label_visibility="collapsed"
+                )
+            else:
+                test_logs_text = st.text_area(
+                    "Paste Test Logs (JSON Array):",
+                    placeholder='[{"EventID": 4688, "Image": "C:\\\\Windows\\\\System32\\\\cmd.exe", ...}]',
+                    height=300,
+                    key="test_logs_input_empty",
+                    label_visibility="collapsed"
+                )
+        
+        st.markdown("---")
+        
+        # Action buttons
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("🔄 Convert to SPL", type="primary", use_container_width=True):
+                if sigma_rule_text.strip():
+                    with st.spinner("Converting Sigma rule to Splunk SPL..."):
+                        result = detection_engine.convert_sigma_to_spl(sigma_rule_text)
+                        
+                        if result["success"]:
+                            st.success("✅ Conversion Successful!")
+                            with st.expander("📊 Splunk SPL Query", expanded=True):
+                                st.code(result["spl_query"], language="sql")
                                 st.download_button(
-                                    "Download Matches (CSV)",
-                                    csv,
-                                    file_name="detected_events.csv",
-                                    mime="text/csv"
+                                    "Download SPL",
+                                    result["spl_query"],
+                                    file_name=f"{selected_rule['title'] if selected_rule else 'sigma_rule'}.spl",
+                                    mime="text/plain"
                                 )
                         else:
-                            st.warning("⚠️ No matches found. The rule did not trigger on the test logs.")
-                    else:
-                        st.error(f"❌ Testing Failed: {result['error']}")
-            else:
-                st.warning("Please provide both a Sigma rule and test logs.")
-    
-    # Help section
-    with st.expander("ℹ️ How to Use Detection Engineering"):
-        st.markdown("""
-        **Getting Started:**
-        1. Click **"⬇️ Download Latest Rules"** to fetch curated Sigma rules from SigmaHQ
-        2. Select a rule from the dropdown
-        3. Review the rule YAML (left) and test logs (right)
-        4. Click **"Convert to SPL"** to generate Splunk query
-        5. Click **"Test Rule"** to simulate detection against synthetic logs
+                            st.error(f"❌ Conversion Failed: {result['error']}")
+                else:
+                    st.warning("Please provide a Sigma rule first.")
         
-        **Sigma Rules:**
-        - Community-driven detection rules from [SigmaHQ](https://github.com/SigmaHQ/sigma)
-        - Platform-agnostic format (YAML)
-        - Mapped to MITRE ATT&CK framework
+        with col_btn2:
+            if st.button("🧪 Test Rule", type="primary", use_container_width=True):
+                if sigma_rule_text.strip() and test_logs_text.strip():
+                    with st.spinner("Testing rule against logs..."):
+                        result = detection_engine.test_sigma_rule(sigma_rule_text, test_logs_text)
+                        
+                        if result["success"]:
+                            if result["count"] > 0:
+                                st.success(f"✅ Rule matched {result['count']} event(s)!")
+                                with st.expander("🎯 Matching Events", expanded=True):
+                                    st.dataframe(result["matches"], use_container_width=True)
+                                    
+                                    csv = result["matches"].to_csv(index=False)
+                                    st.download_button(
+                                        "Download Matches (CSV)",
+                                        csv,
+                                        file_name="detected_events.csv",
+                                        mime="text/csv"
+                                    )
+                            else:
+                                st.warning("⚠️ No matches found. The rule did not trigger on the test logs.")
+                        else:
+                            st.error(f"❌ Testing Failed: {result['error']}")
+                else:
+                    st.warning("Please provide both a Sigma rule and test logs.")
         
-        **Available for:** Windows, Linux, Azure AD, Office 365, CrowdStrike, Palo Alto, Zscaler, and more!
-        """)
+        # Help section
+        with st.expander("ℹ️ How to Use Detection Engineering"):
+            st.markdown("""
+            **Getting Started:**
+            1. Click **"⬇️ Download Latest Rules"** to fetch curated Sigma rules from SigmaHQ
+            2. Select a rule from the dropdown
+            3. Review the rule YAML (left) and test logs (right)
+            4. Click **"Convert to SPL"** to generate Splunk query
+            5. Click **"Test Rule"** to simulate detection against synthetic logs
+            
+            **Sigma Rules:**
+            - Community-driven detection rules from [SigmaHQ](https://github.com/SigmaHQ/sigma)
+            - Platform-agnostic format (YAML)
+            - Mapped to MITRE ATT&CK framework
+            
+            **Available for:** Windows, Linux, Azure AD, Office 365, CrowdStrike, Palo Alto, Zscaler, and more!
+            """)
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #888;">
-    <p>SIEM Onboarding Assistant v1.3 | Now with Detection Engineering | Free AI Support</p>
+    <p>SIEM Onboarding Assistant v1.4 | Detection Engineering + Sanitized Chat | Free AI Support</p>
 </div>
 """, unsafe_allow_html=True)
