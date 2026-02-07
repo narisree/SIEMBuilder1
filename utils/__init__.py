@@ -9,7 +9,7 @@ from .usecase_loader import UseCaseLoader
 # Detection engine is optional (requires pysigma)
 try:
     from .detection_engine import DetectionEngine
-except ImportError:
+except Exception:
     DetectionEngine = None
 
 __all__ = [
