@@ -5,11 +5,6 @@ Supports multiple AI backends: Groq (free), HuggingFace (free), Claude (paid), O
 Now includes CIM Mapping Tool for field-to-CIM data model mapping.
 """
 
-# === DIAGNOSTIC: Will appear in Streamlit Cloud logs ===
-print("[DIAG] ===== app.py loading =====", flush=True)
-
-import sys
-import traceback
 import streamlit as st
 from utils.kb_loader import KBLoader
 from utils.ai_client import AIClientFactory, BaseAIClient
@@ -20,12 +15,9 @@ try:
     from utils.detection_engine import DetectionEngine
     DETECTION_AVAILABLE = True
     detection_import_error = ""
-    print(f"[DIAG] DetectionEngine imported successfully. DETECTION_AVAILABLE={DETECTION_AVAILABLE}", flush=True)
 except Exception as e:
     DETECTION_AVAILABLE = False
-    detection_import_error = f"{type(e).__name__}: {e}"
-    print(f"[DIAG] DetectionEngine import FAILED: {detection_import_error}", flush=True)
-    traceback.print_exc()
+    detection_import_error = str(e)
 
 # Page configuration
 st.set_page_config(
@@ -40,8 +32,8 @@ st.markdown("""
 <style>
     .main-header { font-size: 2.5rem; font-weight: bold; color: #1E3A5F; margin-bottom: 0.5rem; }
     .sub-header { font-size: 1.2rem; color: #5A6C7D; margin-bottom: 2rem; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; padding-left: 20px; padding-right: 20px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; flex-wrap: nowrap; overflow-x: auto; }
+    .stTabs [data-baseweb="tab"] { height: 45px; padding-left: 12px; padding-right: 12px; white-space: nowrap; font-size: 0.9rem; }
     .reference-card { background-color: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; border-left: 4px solid #1E3A5F; }
     .warning-box { background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
     .success-box { background-color: #d4edda; border: 1px solid #28a745; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
@@ -157,11 +149,10 @@ with st.sidebar:
 st.markdown('<p class="main-header">🛡️ SIEM Log Source Onboarding Assistant</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="sub-header">Currently viewing: <strong>{log_sources[selected_source]["display_name"]}</strong></p>', unsafe_allow_html=True)
 
-# Create tabs
-print(f"[DIAG] Creating 7 tabs. DETECTION_AVAILABLE={DETECTION_AVAILABLE}", flush=True)
+# Create tabs — short labels to prevent overflow at 100% zoom
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📘 Integration Guide", "🔗 References", "🎯 Use Cases", 
-    "🔧 CIM Mapper", "💬 AI Chat", "⚙️ AI Setup", "🛡️ Detection Engineering"
+    "📘 Guide", "🔗 References", "🎯 Use Cases", 
+    "🔧 CIM", "💬 Chat", "⚙️ Setup", "🛡️ Detection"
 ])
 
 # Tab 1: Integration Guide
@@ -586,18 +577,15 @@ with tab6:
     **Local:** Create `.streamlit/secrets.toml`
     """)
 
-# Tab 7: Detection Engineering — with full error handling
+# Tab 7: Detection Engineering — AI-Assisted
 with tab7:
-    print(f"[DIAG] Entering tab7. DETECTION_AVAILABLE={DETECTION_AVAILABLE}", flush=True)
     try:
         if not DETECTION_AVAILABLE:
             st.error("🛡️ Detection Engineering Unavailable")
             st.warning(f"**Import error:** `{detection_import_error}`")
             st.markdown("""
             ### How to Fix
-            
-            Install the required packages in your `requirements.txt`:
-            
+            Add these to your `requirements.txt`:
             ```
             pysigma
             pysigma-backend-splunk
@@ -605,68 +593,88 @@ with tab7:
             pyyaml
             requests
             ```
-            
             Then restart the application.
-            
-            **What this tab provides:**
-            - Download curated Sigma rules from SigmaHQ
-            - Convert Sigma YAML rules to Splunk SPL queries
-            - Test rules against synthetic log data
-            - MITRE ATT&CK mapping and metadata
             """)
-            print(f"[DIAG] tab7: showed 'Unavailable' message", flush=True)
         else:
-            print(f"[DIAG] tab7: DETECTION_AVAILABLE=True, rendering Detection Engineering UI", flush=True)
-            st.markdown("### 🛡️ Detection Engineering & Rule Standardization")
-            st.info(f"📍 Detection rules for **{log_sources[selected_source]['display_name']}**")
+            st.markdown("### 🛡️ Detection Engineering")
+            
+            # Show AI status
+            ai_client = st.session_state.get("ai_client")
+            source_name = log_sources[selected_source]['display_name']
+            
+            col_info1, col_info2 = st.columns([2, 1])
+            with col_info1:
+                st.info(f"📍 **{source_name}** — Detection rules via [SigmaHQ](https://github.com/SigmaHQ/sigma)")
+            with col_info2:
+                if ai_client:
+                    st.success(f"🤖 AI: {ai_client.get_provider_name()}")
+                else:
+                    st.warning("🤖 AI: Not configured")
             
             # Initialize Detection Engine
             detection_engine = DetectionEngine()
             
-            # Get available rules for selected source
+            # Get available rules
             available_rules = detection_engine.get_rules_for_source(selected_source)
             
-            # Rule management row
-            col_download, col_selector = st.columns([1, 2])
+            # ── Download & Select Row ─────────────────────────────────────
+            col_download, col_count, col_selector = st.columns([1, 0.5, 2])
             
             with col_download:
-                if st.button("⬇️ Download Latest Rules", type="secondary", use_container_width=True):
-                    with st.spinner("Downloading rules from SigmaHQ GitHub..."):
-                        result = detection_engine.download_rules_from_github(selected_source)
+                if st.button("⬇️ Download Rules", type="secondary", use_container_width=True,
+                             help="Fetch Sigma rules from SigmaHQ GitHub"):
+                    progress_bar = st.progress(0, text="Connecting to SigmaHQ...")
+                    status_text = st.empty()
+                    
+                    def progress_cb(msg):
+                        status_text.caption(msg)
+                    
+                    with st.spinner("Downloading..."):
+                        result = detection_engine.download_rules_from_github(
+                            selected_source,
+                            max_rules_per_path=50,
+                            progress_callback=progress_cb
+                        )
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    if result["success"]:
+                        new = result["downloaded_count"]
+                        skip = result["skipped_count"]
+                        upd = result["updated_count"]
+                        mis = result.get("mismatched_count", 0)
                         
-                        if result["success"]:
-                            new = result["downloaded_count"]
-                            skipped = result["skipped_count"]
-                            updated = result["updated_count"]
-                            
-                            # Show rate limit info if available
-                            if result.get("rate_limit_remaining") is not None:
-                                remaining = result["rate_limit_remaining"]
-                                if remaining < 10:
-                                    st.warning(f"⚠️ GitHub API rate limit low: {remaining} requests remaining. Resets at {result.get('rate_limit_reset', 'unknown')}.")
-                                else:
-                                    st.caption(f"GitHub API: {remaining} requests remaining")
-                            
-                            if new > 0:
-                                st.success(f"✅ Downloaded {new} new rule(s)!")
-                            if skipped > 0:
-                                st.info(f"ℹ️ Skipped {skipped} duplicate(s)")
-                            if updated > 0:
-                                st.info(f"✅ Updated {updated} existing rule(s)")
-                            if new == 0 and updated == 0:
-                                st.info("All rules are up to date!")
-                            
-                            # Refresh available rules
-                            available_rules = detection_engine.get_rules_for_source(selected_source)
-                            st.rerun()
+                        if result.get("rate_limit_remaining") is not None:
+                            remaining = result["rate_limit_remaining"]
+                            if remaining < 10:
+                                st.warning(f"⚠️ GitHub API rate limit low: {remaining} remaining. Resets at {result.get('rate_limit_reset', 'unknown')}.")
+                        
+                        if new > 0:
+                            st.success(f"✅ Downloaded {new} new rule(s)")
+                        if upd > 0:
+                            st.info(f"🔄 Updated {upd} rule(s)")
+                        if skip > 0:
+                            st.caption(f"Skipped {skip} duplicate(s)")
+                        if mis > 0:
+                            with st.expander(f"ℹ️ {mis} rule(s) re-categorized by product"):
+                                for m in result.get("mismatched_rules", [])[:10]:
+                                    st.caption(f"  `{m['name']}` — product: **{m['product']}** → stored under **{m['mapped_to']}**")
+                        if new == 0 and upd == 0:
+                            st.info("All rules are up to date!")
+                        
+                        available_rules = detection_engine.get_rules_for_source(selected_source)
+                        st.rerun()
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        if "rate limit" in error_msg.lower() or result.get("rate_limited"):
+                            reset_time = result.get("rate_limit_reset", "~1 hour")
+                            st.error(f"🚫 GitHub rate limit exceeded. Resets at {reset_time}.")
                         else:
-                            error_msg = result.get('error', 'Unknown error')
-                            if "rate limit" in error_msg.lower() or result.get("rate_limited"):
-                                reset_time = result.get("rate_limit_reset", "~1 hour")
-                                st.error(f"🚫 GitHub API rate limit exceeded. Resets at {reset_time}.")
-                                st.info("**Tip:** Unauthenticated requests are limited to 60/hour. Wait and retry, or add a GitHub token.")
-                            else:
-                                st.error(f"Download failed: {error_msg}")
+                            st.error(f"Download failed: {error_msg}")
+            
+            with col_count:
+                st.metric("Rules", len(available_rules))
             
             with col_selector:
                 if available_rules:
@@ -678,19 +686,20 @@ with tab7:
                     )
                     selected_rule = rule_options[selected_rule_title]
                 else:
-                    st.warning("No rules available. Click 'Download Latest Rules' to fetch from SigmaHQ.")
+                    st.warning("No rules yet. Click **Download Rules** to fetch from SigmaHQ.")
                     selected_rule = None
             
-            # Display rule metadata
+            # ── Rule Metadata ─────────────────────────────────────────────
             if selected_rule:
-                col_meta1, col_meta2, col_meta3 = st.columns(3)
-                with col_meta1:
+                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                with col_m1:
                     st.metric("Status", selected_rule["status"].upper())
-                with col_meta2:
+                with col_m2:
                     st.metric("Severity", selected_rule["level"].upper())
-                with col_meta3:
-                    mitre_count = len(selected_rule["mitre_tags"])
-                    st.metric("MITRE Techniques", mitre_count)
+                with col_m3:
+                    st.metric("Product", selected_rule.get("product", "—"))
+                with col_m4:
+                    st.metric("MITRE Tags", len(selected_rule["mitre_tags"]))
                 
                 if selected_rule["mitre_tags"]:
                     st.caption(f"🎯 **MITRE ATT&CK:** {', '.join(selected_rule['mitre_tags'])}")
@@ -700,138 +709,149 @@ with tab7:
             
             st.markdown("---")
             
-            # Two-column layout for rule and test logs
+            # ── Rule YAML & Test Logs ─────────────────────────────────────
             col_left, col_right = st.columns(2)
             
             with col_left:
                 st.markdown("#### 📜 Sigma Rule (YAML)")
                 if selected_rule:
                     sigma_rule_text = st.text_area(
-                        "Edit Sigma Rule:",
-                        value=selected_rule["rule_yaml"],
-                        height=300,
-                        key="sigma_rule_input",
-                        label_visibility="collapsed"
+                        "Edit Sigma Rule:", value=selected_rule["rule_yaml"],
+                        height=300, key="sigma_rule_input", label_visibility="collapsed"
                     )
                 else:
                     sigma_rule_text = st.text_area(
                         "Paste Sigma Rule YAML:",
                         placeholder="Paste your Sigma rule in YAML format...",
-                        height=300,
-                        key="sigma_rule_input_empty",
-                        label_visibility="collapsed"
+                        height=300, key="sigma_rule_input_empty", label_visibility="collapsed"
                     )
             
             with col_right:
                 st.markdown("#### 🔍 Test Logs (JSON)")
+                
+                # Check for cached test logs
+                cached_logs = "[]"
                 if selected_rule:
-                    test_logs_default = detection_engine.get_test_logs_for_rule(
-                        selected_source, 
-                        selected_rule["filename"]
+                    cached_logs = detection_engine.get_test_logs_for_rule(
+                        selected_source, selected_rule["filename"]
                     )
-                    test_logs_text = st.text_area(
-                        "Edit Test Logs:",
-                        value=test_logs_default if test_logs_default != "[]" else "[]",
-                        height=300,
-                        key="test_logs_input",
-                        label_visibility="collapsed"
-                    )
-                else:
-                    test_logs_text = st.text_area(
-                        "Paste Test Logs (JSON Array):",
-                        placeholder='[{"EventID": 4688, "Image": "C:\\\\Windows\\\\System32\\\\cmd.exe", ...}]',
-                        height=300,
-                        key="test_logs_input_empty",
-                        label_visibility="collapsed"
-                    )
+                
+                # AI Generate button
+                if ai_client and sigma_rule_text.strip():
+                    if st.button("🤖 Generate Test Logs with AI", key="gen_test_logs",
+                                 use_container_width=True, type="secondary"):
+                        with st.spinner(f"Generating test logs with {ai_client.get_provider_name()}..."):
+                            gen_result = detection_engine.generate_test_logs(sigma_rule_text, ai_client)
+                            if gen_result["success"]:
+                                cached_logs = gen_result["logs"]
+                                # Cache for reuse
+                                if selected_rule:
+                                    detection_engine.save_test_logs(
+                                        selected_source, selected_rule["filename"], cached_logs
+                                    )
+                                st.success("✅ Test logs generated!")
+                            else:
+                                st.error(f"Generation failed: {gen_result['error']}")
+                elif not ai_client:
+                    st.caption("💡 Configure AI in **Setup** tab to auto-generate test logs")
+                
+                test_logs_text = st.text_area(
+                    "Edit Test Logs:", value=cached_logs if cached_logs != "[]" else "[]",
+                    height=250, key="test_logs_input", label_visibility="collapsed"
+                )
             
             st.markdown("---")
             
-            # Action buttons
-            col_btn1, col_btn2 = st.columns(2)
+            # ── Action Buttons ────────────────────────────────────────────
+            col_btn1, col_btn2, col_btn3 = st.columns(3)
             
             with col_btn1:
                 if st.button("🔄 Convert to SPL", type="primary", use_container_width=True):
                     if sigma_rule_text.strip():
-                        with st.spinner("Converting Sigma rule to Splunk SPL..."):
-                            result = detection_engine.convert_sigma_to_spl(sigma_rule_text)
-                            
-                            if result["success"]:
-                                st.success("✅ Conversion Successful!")
-                                with st.expander("📊 Splunk SPL Query", expanded=True):
-                                    st.code(result["spl_query"], language="sql")
-                                    st.download_button(
-                                        "Download SPL",
-                                        result["spl_query"],
-                                        file_name=f"{selected_rule['title'] if selected_rule else 'sigma_rule'}.spl",
-                                        mime="text/plain"
-                                    )
-                            else:
-                                st.error(f"❌ Conversion Failed: {result['error']}")
+                        method_label = f"with {ai_client.get_provider_name()}" if ai_client else "with pySigma"
+                        with st.spinner(f"Converting {method_label}..."):
+                            result = detection_engine.convert_sigma_to_spl(sigma_rule_text, ai_client)
+                        
+                        if result["success"]:
+                            st.success(f"✅ Converted via **{result['method']}**")
+                            with st.expander("📊 Splunk SPL Query", expanded=True):
+                                st.code(result["spl_query"], language="sql")
+                                st.download_button(
+                                    "Download SPL", result["spl_query"],
+                                    file_name=f"{selected_rule['title'] if selected_rule else 'sigma_rule'}.spl",
+                                    mime="text/plain"
+                                )
+                        else:
+                            st.error(f"❌ {result['error']}")
                     else:
-                        st.warning("Please provide a Sigma rule first.")
+                        st.warning("Provide a Sigma rule first.")
             
             with col_btn2:
                 if st.button("🧪 Test Rule", type="primary", use_container_width=True):
-                    if sigma_rule_text.strip() and test_logs_text.strip():
+                    if sigma_rule_text.strip() and test_logs_text.strip() and test_logs_text.strip() != "[]":
                         with st.spinner("Testing rule against logs..."):
                             result = detection_engine.test_sigma_rule(sigma_rule_text, test_logs_text)
-                            
-                            if result["success"]:
-                                if result["count"] > 0:
-                                    st.success(f"✅ Rule matched {result['count']} event(s)!")
-                                    with st.expander("🎯 Matching Events", expanded=True):
-                                        st.dataframe(result["matches"], use_container_width=True)
-                                        
-                                        csv_data = result["matches"].to_csv(index=False)
-                                        st.download_button(
-                                            "Download Matches (CSV)",
-                                            csv_data,
-                                            file_name="detected_events.csv",
-                                            mime="text/csv"
-                                        )
-                                else:
-                                    st.warning("⚠️ No matches found. The rule did not trigger on the test logs.")
+                        
+                        if result["success"]:
+                            if result["count"] > 0:
+                                st.success(f"✅ Matched **{result['count']}** event(s)!")
+                                with st.expander("🎯 Matching Events", expanded=True):
+                                    st.dataframe(result["matches"], use_container_width=True)
+                                    csv_data = result["matches"].to_csv(index=False)
+                                    st.download_button(
+                                        "Download CSV", csv_data,
+                                        file_name="detected_events.csv", mime="text/csv"
+                                    )
                             else:
-                                st.error(f"❌ Testing Failed: {result['error']}")
+                                st.warning("⚠️ No matches. Rule did not trigger on test logs.")
+                        else:
+                            st.error(f"❌ {result['error']}")
                     else:
-                        st.warning("Please provide both a Sigma rule and test logs.")
+                        st.warning("Provide both a Sigma rule and test logs.")
             
-            # Help section
-            with st.expander("ℹ️ How to Use Detection Engineering"):
+            with col_btn3:
+                if ai_client and sigma_rule_text.strip():
+                    if st.button("🤖 AI: Generate Test Logs", use_container_width=True, type="secondary"):
+                        with st.spinner(f"Generating with {ai_client.get_provider_name()}..."):
+                            gen_result = detection_engine.generate_test_logs(sigma_rule_text, ai_client)
+                        if gen_result["success"]:
+                            st.success("✅ Generated! Paste into Test Logs area.")
+                            st.code(gen_result["logs"], language="json")
+                            if selected_rule:
+                                detection_engine.save_test_logs(
+                                    selected_source, selected_rule["filename"], gen_result["logs"]
+                                )
+                        else:
+                            st.error(gen_result["error"])
+            
+            # ── Help Section ──────────────────────────────────────────────
+            with st.expander("ℹ️ How to Use"):
                 st.markdown("""
-                **Getting Started:**
-                1. Click **"⬇️ Download Latest Rules"** to fetch curated Sigma rules from SigmaHQ
-                2. Select a rule from the dropdown
-                3. Review the rule YAML (left) and test logs (right)
-                4. Click **"Convert to SPL"** to generate Splunk query
-                5. Click **"Test Rule"** to simulate detection against synthetic logs
+                **Workflow:**
+                1. **Download Rules** — fetches Sigma rules from SigmaHQ, auto-categorized by product
+                2. **Select a rule** from the dropdown
+                3. **Generate Test Logs** — AI creates realistic log events (or paste your own)
+                4. **Convert to SPL** — AI generates proper Splunk query (falls back to pySigma)
+                5. **Test Rule** — validates detection logic against test logs
                 
-                **Sigma Rules:**
-                - Community-driven detection rules from [SigmaHQ](https://github.com/SigmaHQ/sigma)
-                - Platform-agnostic format (YAML)
-                - Mapped to MITRE ATT&CK framework
+                **AI Features** (requires AI configured in Setup tab):
+                - 🤖 **Smart SPL conversion** — proper index, sourcetype, field mapping
+                - 🤖 **Test log generation** — realistic events matching rule fields
+                - 📦 **Product categorization** — rules sorted by their actual `logsource.product`
                 
-                **Available for:** Windows, Linux, Azure AD, Office 365, CrowdStrike, Palo Alto, Zscaler, and more!
+                **Without AI:**
+                - SPL conversion uses pySigma library (basic output)
+                - Test logs must be provided manually
                 """)
     except Exception as e:
-        error_detail = f"{type(e).__name__}: {e}"
-        print(f"[DIAG] tab7 EXCEPTION: {error_detail}", flush=True)
-        traceback.print_exc()
-        st.error(f"🛡️ Detection Engineering tab encountered an error: {error_detail}")
+        import traceback
+        st.error(f"🛡️ Detection tab error: {type(e).__name__}: {e}")
         st.code(traceback.format_exc(), language="python")
-        st.markdown("""
-        **Troubleshooting Steps:**
-        1. Restart Streamlit: `streamlit run app.py`
-        2. Clear cache: Delete `.streamlit/cache/` folder
-        3. Verify `utils/detection_engine.py` exists and is up to date
-        4. Install dependencies: `pip install pysigma pysigma-backend-splunk pandas pyyaml requests`
-        """)
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #888;">
-    <p>SIEM Onboarding Assistant v1.4 | Detection Engineering + Sanitized Chat | Free AI Support</p>
+    <p>SIEM Onboarding Assistant v2.0 | AI-Assisted Detection Engineering | Free AI Support</p>
 </div>
 """, unsafe_allow_html=True)
