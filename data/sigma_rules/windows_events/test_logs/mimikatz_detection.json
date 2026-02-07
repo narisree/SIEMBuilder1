@@ -1,0 +1,29 @@
+[
+  {
+    "EventID": 4688,
+    "Image": "C:\\Tools\\mimikatz.exe",
+    "CommandLine": "mimikatz.exe sekurlsa::logonpasswords",
+    "User": "CORP\\Administrator",
+    "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+    "ProcessId": 1234,
+    "LogonId": "0x3e7"
+  },
+  {
+    "EventID": 4688,
+    "Image": "C:\\Program Files\\mimikatz\\mimikatz.exe",
+    "CommandLine": "mimikatz lsadump::sam",
+    "User": "WORKGROUP\\admin",
+    "ParentImage": "C:\\Windows\\System32\\powershell.exe",
+    "ProcessId": 5678,
+    "LogonId": "0x12345"
+  },
+  {
+    "EventID": 4688,
+    "Image": "C:\\Windows\\notepad.exe",
+    "CommandLine": "notepad.exe",
+    "User": "CORP\\User",
+    "ParentImage": "C:\\Windows\\explorer.exe",
+    "ProcessId": 9012,
+    "LogonId": "0x67890"
+  }
+]

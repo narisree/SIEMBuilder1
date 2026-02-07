@@ -11,3 +11,10 @@ sentence-transformers>=2.2.0
 
 # Document Processing
 pypdf>=3.0.0
+
+# Detection Engineering (Sigma Rules)
+pysigma>=0.10.0
+pysigma-backend-splunk>=1.0.0
+pysigma-backend-sqlite>=0.1.0
+pandas>=2.0.0
+pyyaml>=6.0

